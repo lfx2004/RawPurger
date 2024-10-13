@@ -1,14 +1,17 @@
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import os
 from PIL import Image, ImageTk
 from PIL.ExifTags import TAGS
 import exifread
 from datetime import datetime
+from send2trash import send2trash
+
 
 class DelMode:
     DELRAW = 0  # 删除RAW
     DELJPG = 1  # 删除JPG
+
 
 class PictCleaner:
     picture_list = []
@@ -16,7 +19,8 @@ class PictCleaner:
     raw_list = []
     del_list = []
     jpg_suffixes_list = [".jpg", ".jpeg"]  # 所有jpg格式后缀
-    raw_suffixes_list = [".nef", ".cr2", ".cr3", ".arw", ".raf", ".orf", ".dng", ".rwl", ".pef", ".rw2", ".3fr"]  # 所有raw格式后缀
+    raw_suffixes_list = [".nef", ".cr2", ".cr3", ".arw", ".raf", ".orf", ".dng", ".rwl", ".pef", ".rw2",
+                         ".3fr"]  # 所有raw格式后缀
     search_path = "D:/picTest"
 
     def __init__(self, root):
@@ -66,18 +70,41 @@ class PictCleaner:
         self.scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         self.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
+        # 初始化按钮状态
+        self.update_button_states()
+
     def select_folder(self):
         folder_selected = filedialog.askdirectory()
         if folder_selected:
             self.search_path = folder_selected
             self.path_label.config(text=self.search_path)
+            self.update_button_states()  # 更新按钮状态
 
     def search_action(self):
         self.update_del_list(mode=self.mode_var.get(), recursive=self.search_recursive_var.get())
         self.display_thumbnails()  # 显示待删除照片的缩略图
+        self.update_button_states()  # 更新按钮状态
 
     def clean_action(self):
-        pass
+        num_files = len(self.del_list)
+        if num_files == 0:
+            messagebox.showinfo("信息", "没有文件需要删除。")
+            return
+
+        # 弹出二次确认
+        response = messagebox.askyesno("确认删除", f"您确定要删除 {num_files} 个文件吗？")
+        if response:
+            # 开始删除文件
+            for file_name in self.del_list:
+                file_path = os.path.join(self.search_path, file_name)
+                file_path = os.path.normpath(file_path)
+                if os.path.exists(file_path):
+                    send2trash(file_path)  # 将文件移动到回收站
+                    print(f"File {file_name} has been moved to the recycle bin.")
+            messagebox.showinfo("信息", "文件删除成功。")
+            self.del_list.clear()  # 清空已删除的文件列表
+            self.update_button_states()  # 更新按钮状态
+            self.display_thumbnails()
 
     def display_thumbnails(self):
         # 清空当前的缩略图显示
@@ -93,15 +120,36 @@ class PictCleaner:
                 img.thumbnail((100, 100))  # 生成缩略图
                 img_tk = ImageTk.PhotoImage(img)
 
-                # 在Label中显示缩略图
-                label = tk.Label(frame, image=img_tk)
+                # 创建一个Frame来包裹缩略图和文件名标签
+                thumbnail_frame = tk.Frame(frame)
+                thumbnail_frame.pack(side=tk.LEFT, padx=5, pady=5)
+
+                # 在Frame中显示缩略图
+                label = tk.Label(thumbnail_frame, image=img_tk)
                 label.image = img_tk  # 保持引用，防止图片被回收
-                label.pack(side=tk.LEFT, padx=5, pady=5)
+                label.pack()
+
+                # 在缩略图下方显示文件名
+                filename_label = tk.Label(thumbnail_frame, text=img_file, wraplength=100)
+                filename_label.pack()
+
             except Exception as e:
                 print(f"无法打开 {img_path}: {e}")
 
         frame.update_idletasks()
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
+    def update_button_states(self):
+        """更新按钮状态"""
+        if not self.search_path:
+            self.search_button.config(state=tk.DISABLED)
+        else:
+            self.search_button.config(state=tk.NORMAL)
+
+        if not self.del_list:
+            self.clean_button.config(state=tk.DISABLED)
+        else:
+            self.clean_button.config(state=tk.NORMAL)
 
     @staticmethod
     def get_exif_data(image_path):
@@ -152,12 +200,12 @@ class PictCleaner:
         raw_date = self.parse_exif_datetime(raw_exif.get("DateTimeOriginal"))
         if jpg_date is None or raw_date is None:
             return False
-        if abs((jpg_date - raw_date).total_seconds()) > 1:
+        if abs((jpg_date - raw_date).total_seconds()) > 10:
             return False
 
         jpg_mod_time = os.path.getmtime(jpg_path1)
         raw_mod_time = os.path.getmtime(raw_path2)
-        if abs(jpg_mod_time - raw_mod_time) > 1:
+        if abs(jpg_mod_time - raw_mod_time) > 10:
             return False
         return True
 
@@ -204,6 +252,7 @@ class PictCleaner:
                             self.del_list.append(jpg_item)
                             break
         print("del_list: " + self.del_list.__str__())
+
 
 if __name__ == "__main__":
     root = tk.Tk()
