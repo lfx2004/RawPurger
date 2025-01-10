@@ -21,12 +21,15 @@ class PictCleaner:
     jpg_suffixes_list = [".jpg", ".jpeg"]  # 所有jpg格式后缀
     raw_suffixes_list = [".nef", ".cr2", ".cr3", ".arw", ".raf", ".orf", ".dng", ".rwl", ".pef", ".rw2",
                          ".3fr"]  # 所有raw格式后缀
-    search_path = "D:/picTest"
+    search_path = ''
 
     def __init__(self, root):
         self.root = root
         self.root.title("Raw Purger")
-        self.root.geometry("700x600")  # 扩大窗口大小以显示缩略图
+        self.root.geometry("750x600")
+
+        # 初始化缩略图大小
+        self.thumbnail_size = 120
 
         # 选择文件夹按钮
         self.path_frame = tk.Frame(root)
@@ -35,6 +38,10 @@ class PictCleaner:
         self.folder_button.pack(side=tk.LEFT, padx=5, pady=5)
         self.path_label = tk.Label(self.path_frame, text=self.search_path)
         self.path_label.pack(side=tk.LEFT, padx=5, pady=5)
+
+        # 显示搜索到的照片总数
+        self.photo_count_label = tk.Label(self.path_frame, text="找到 0 张冗余照片")
+        self.photo_count_label.pack(side=tk.RIGHT, padx=5, pady=5)
 
         self.thumbnail_frame = tk.Frame(root)  # 用于显示缩略图的区域
         self.thumbnail_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
@@ -48,30 +55,42 @@ class PictCleaner:
         self.radio_frame = tk.Frame(self.operate_frame)
         self.radio_frame.pack(side=tk.LEFT, padx=5, pady=5)
         self.del_raw_radio = tk.Radiobutton(self.radio_frame, text="删除冗余RAW", variable=self.mode_var,
-                                            value=DelMode.DELRAW)
+                                            value=DelMode.DELRAW, command=self.search_action)
         self.del_raw_radio.pack(side=tk.LEFT, padx=5, pady=5)
         self.del_jpg_radio = tk.Radiobutton(self.radio_frame, text="删除冗余JPG", variable=self.mode_var,
-                                            value=DelMode.DELJPG)
+                                            value=DelMode.DELJPG, command=self.search_action)
         self.del_jpg_radio.pack(side=tk.LEFT, padx=5, pady=5)
-        self.recursive_check = tk.Checkbutton(self.radio_frame, text="递归查找", variable=self.search_recursive_var)
+        self.recursive_check = tk.Checkbutton(self.radio_frame, text="递归文件夹", variable=self.search_recursive_var, command=self.search_action)
         self.recursive_check.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Clean按钮
-        self.clean_button = tk.Button(self.operate_frame, text="执行删除", command=self.clean_action)
+        self.clean_button = tk.Button(self.operate_frame, text="   执行删除   ", command=self.clean_action)
         self.clean_button.pack(side=tk.RIGHT, padx=5, pady=5)
-        # 查找按钮
-        self.search_button = tk.Button(self.operate_frame, text="查找冗余", command=self.search_action)
-        self.search_button.pack(side=tk.RIGHT, padx=5, pady=5)
 
         # 设置缩略图显示区域
         self.canvas = tk.Canvas(self.thumbnail_frame, bg='white')
-        self.scrollbar = tk.Scrollbar(self.thumbnail_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
-        self.canvas.configure(xscrollcommand=self.scrollbar.set)
-        self.scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-        self.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.scrollbar = tk.Scrollbar(self.thumbnail_frame, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # 鼠标滚轮事件绑定
+        self.root.bind("<Control-MouseWheel>", self.adjust_thumbnail_size)
+        self.root.bind("<MouseWheel>", self.on_mouse_wheel)  # 绑定滚轮事件来滚动视图
 
         # 初始化按钮状态
         self.update_button_states()
+
+    def adjust_thumbnail_size(self, event):
+        """调整缩略图大小"""
+        delta = 10 if event.delta > 0 else -10
+        self.thumbnail_size = max(50, min(300, self.thumbnail_size + delta))
+        self.display_thumbnails()
+
+    def on_mouse_wheel(self, event):
+        """滚动事件处理，控制Canvas上下滚动"""
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
 
     def select_folder(self):
         folder_selected = filedialog.askdirectory()
@@ -79,11 +98,17 @@ class PictCleaner:
             self.search_path = folder_selected
             self.path_label.config(text=self.search_path)
             self.update_button_states()  # 更新按钮状态
+            self.search_action()
 
     def search_action(self):
+        if self.search_path == '':
+            return
         self.update_del_list(mode=self.mode_var.get(), recursive=self.search_recursive_var.get())
         self.display_thumbnails()  # 显示待删除照片的缩略图
         self.update_button_states()  # 更新按钮状态
+        self.photo_count_label.config(text=f"找到 {len(self.del_list)} 张冗余照片")
+        if len(self.del_list) == 0:
+            messagebox.showinfo("提示", "没有找到任何冗余照片。")
 
     def clean_action(self):
         num_files = len(self.del_list)
@@ -101,28 +126,38 @@ class PictCleaner:
                 if os.path.exists(file_path):
                     send2trash(file_path)  # 将文件移动到回收站
                     print(f"File {file_name} has been moved to the recycle bin.")
-            messagebox.showinfo("信息", "文件删除成功。")
+            messagebox.showinfo("信息", "文件删除成功。请检查回收站！")
             self.del_list.clear()  # 清空已删除的文件列表
             self.update_button_states()  # 更新按钮状态
             self.display_thumbnails()
+            self.photo_count_label.config(text="找到 0 张冗余照片")
 
     def display_thumbnails(self):
         # 清空当前的缩略图显示
         self.canvas.delete("all")
 
+        # 使用Frame作为缩略图容器
         frame = tk.Frame(self.canvas)
         self.canvas.create_window((0, 0), window=frame, anchor='nw')
+
+        # 动态计算每行显示的缩略图数量
+        canvas_width = self.canvas.winfo_width() or 700  # 防止初始宽度为0
+        thumbnails_per_row = max(1, canvas_width // (self.thumbnail_size + 20))
+
+        row = 0
+        col = 0
 
         for img_file in self.del_list:
             img_path = os.path.join(self.search_path, img_file)
             try:
                 img = Image.open(img_path)
-                img.thumbnail((100, 100))  # 生成缩略图
+                img.thumbnail((self.thumbnail_size, self.thumbnail_size))  # 生成缩略图
                 img_tk = ImageTk.PhotoImage(img)
 
                 # 创建一个Frame来包裹缩略图和文件名标签
-                thumbnail_frame = tk.Frame(frame)
-                thumbnail_frame.pack(side=tk.LEFT, padx=5, pady=5)
+                thumbnail_frame = tk.Frame(frame, width=self.thumbnail_size + 20, height=self.thumbnail_size + 40)
+                thumbnail_frame.grid(row=row, column=col, padx=5, pady=5)
+                thumbnail_frame.grid_propagate(False)  # 固定Frame大小
 
                 # 在Frame中显示缩略图
                 label = tk.Label(thumbnail_frame, image=img_tk)
@@ -130,8 +165,14 @@ class PictCleaner:
                 label.pack()
 
                 # 在缩略图下方显示文件名
-                filename_label = tk.Label(thumbnail_frame, text=img_file, wraplength=100)
+                filename_label = tk.Label(thumbnail_frame, text=img_file, wraplength=self.thumbnail_size,
+                                          anchor="center")
                 filename_label.pack()
+
+                col += 1
+                if col >= thumbnails_per_row:  # 如果到达每行最大缩略图数，换行
+                    col = 0
+                    row += 1
 
             except Exception as e:
                 print(f"无法打开 {img_path}: {e}")
@@ -141,11 +182,6 @@ class PictCleaner:
 
     def update_button_states(self):
         """更新按钮状态"""
-        if not self.search_path:
-            self.search_button.config(state=tk.DISABLED)
-        else:
-            self.search_button.config(state=tk.NORMAL)
-
         if not self.del_list:
             self.clean_button.config(state=tk.DISABLED)
         else:
